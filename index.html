@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QR Student Login System</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    #reader { width: 300px; margin: auto; }
+    table { width: 90%; margin: auto; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 10px; }
+    input, button { padding: 10px; margin: 5px; }
+    button { cursor: pointer; }
+    .print-btn { background-color: #4CAF50; color: white; border: none; }
+  </style>
+</head>
+<body>
+
+<h2>📷 QR Code Scanner (Login/Logout)</h2>
+<div id="reader"></div>
+<p id="scanResult" style="font-weight: bold; color: green;"></p>
+
+<hr>
+
+<h2>👨‍💼 Admin Panel - Add Student</h2>
+<input type="text" id="studentName" placeholder="Enter student name">
+<button onclick="addStudent()">Add & Generate QR</button>
+
+<div id="qr-output"></div>
+
+<h3>📋 Student List</h3>
+<button class="print-btn" onclick="printAttendance()">🖨️ Print Attendance</button>
+
+<table id="studentTableContainer">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>QR Code</th>
+      <th>Login Time</th>
+      <th>Logout Time</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="studentTable"></tbody>
+</table>
+<link rel="stylesheet" href="style.css">
+
+<script>
+let lastScannedCode = "";
+let lastScanTime = 0;
+
+function addStudent() {
+  const name = document.getElementById("studentName").value.trim();
+  if (!name) return alert("Enter student name");
+
+  const code = name.toLowerCase().replace(/\s+/g, "_");
+
+  fetch("save_student.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, code })
+  })
+  .then(res => res.json())
+  .then(data => {
+    alert(data.message);
+    if (data.status === "ok") {
+      generateQR(code, name);
+      loadStudents();
+    }
+  });
+}
+
+function generateQR(code, name) {
+  const div = document.getElementById("qr-output");
+  div.innerHTML = `<h4>QR Code for: ${name}</h4>`;
+  QRCode.toCanvas(code, { width: 200 }, (err, canvas) => {
+    if (!err) div.appendChild(canvas);
+  });
+}
+
+function onScanSuccess(decodedText) {
+  const now = Date.now();
+  if (decodedText === lastScannedCode && now - lastScanTime < 60000) {
+    console.log("Ignored repeated scan within 60 seconds.");
+    document.getElementById("scanResult").innerText = "Please wait 60 seconds before scanning again.";
+    return;
+  }
+
+  lastScannedCode = decodedText;
+  lastScanTime = now;
+
+  fetch("scan_action.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: decodedText })
+  })
+  .then(res => res.json())
+  .then(data => {
+    document.getElementById("scanResult").innerText = data.message;
+    loadStudents();
+  });
+}
+
+function loadStudents() {
+  fetch("fetch_students.php")
+    .then(res => res.json())
+    .then(data => {
+      const table = document.getElementById("studentTable");
+      table.innerHTML = '';
+      data.forEach(student => {
+        const row = `
+          <tr>
+            <td>
+              ${student.name}<br>
+              <button onclick="deleteField('${student.code}', 'name')">🗑️ Delete Name</button>
+            </td>
+            <td><canvas id="qr-${student.code}"></canvas></td>
+            <td>
+              ${student.login_time || ''}<br>
+              <button onclick="deleteField('${student.code}', 'login')">🗑️ Delete Login</button>
+            </td>
+            <td>
+              ${student.logout_time || ''}<br>
+              <button onclick="deleteField('${student.code}', 'logout')">🗑️ Delete Logout</button>
+            </td>
+            <td style="color:${student.status === 'logged_in' ? 'green' : 'gray'}">${student.status}</td>
+          </tr>`;
+        table.innerHTML += row;
+      });
+
+      // Render QR codes
+      data.forEach(student => {
+        const canvas = document.getElementById("qr-" + student.code);
+        QRCode.toCanvas(canvas, student.code, { width: 80 });
+      });
+    });
+}
+
+function deleteField(code, field) {
+  fetch("delete_field.php", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, field })
+  })
+  .then(res => res.json())
+  .then(data => {
+    alert(data.message);
+    loadStudents();
+  });
+}
+
+function printAttendance() {
+  const originalContent = document.body.innerHTML;
+  const printContent = document.getElementById("studentTableContainer").outerHTML;
+
+  const style = `
+    <style>
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #000; padding: 8px; }
+    </style>
+  `;
+
+  document.body.innerHTML = `<h2>Student Attendance Report</h2>${style}${printContent}`;
+  window.print();
+  document.body.innerHTML = originalContent;
+  loadStudents(); // Re-load the content after print
+}
+
+const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+scanner.render(onScanSuccess);
+
+loadStudents();
+</script>
+<script src="actions.js"></script>
+<button class="print-btn" onclick="printAttendance()">🖨️ Print Attendance</button>
+
+</body>
+</html>
